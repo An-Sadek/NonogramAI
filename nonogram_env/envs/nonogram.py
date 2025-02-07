@@ -76,6 +76,14 @@ class NonogramEnv(gym.Env):
             "game_mtx": self.game_mtx
         }
 
-    
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
 
+        # Reset ve vi tri 0, 0
+        self._agent_location = self.np_random(0, 1, size=2, dtype=int)
+
+        # Tao ma tran game, va goi y
+
+if __name__ == "__main__":
+    pass
         
