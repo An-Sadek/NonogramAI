@@ -33,10 +33,13 @@ class NonogramEnv(gym.Env):
             {
                 "agent": spaces.Box(0, size - 1, shape=(2,), dtype=int),
                 "target": spaces.Box(0, size - 1, shape=(2,), dtype=int),
+
+                # Ma tran game
+                "game_mtx": spaces.MultiBinary([size, size]),
                 
                 # Goi y se co gia tri tu 1 -> size (do xac suat 0.5), nhung de chac chan thi quan sat bat dau tu 0
-                "row_clues": spaces.Box(0, size, shape=(size, math.ceil(size/2))),
-                "col_clues": spaces.Box(0, size, shape=(size, math.ceil(size/2)))
+                "row_clues": spaces.Box(0, size+1, shape=(size, math.ceil(size/2))),
+                "col_clues": spaces.Box(0, size+1, shape=(size, math.ceil(size/2)))
             }
         )
 
@@ -45,11 +48,12 @@ class NonogramEnv(gym.Env):
         self.action_space = spaces.Discrete(7)
         self.row_clues = spaces.Box(0, size, shape=(size, math.ceil(size/2)))
         self.col_clues = spaces.Box(0, size, shape=(size, math.ceil(size/2)))
+        self.game_mtx = spaces.MultiBinary([size, size])
 
         # Cong tru toa do theo huong di chuyen
         self._action_to_direction = {
             Actions.stay.value: np.array([0, 0]),
-            Actions.up.value: np.array{[0, 1]},
+            Actions.up.value: np.array([0, 1]),
             Actions.down.value: np.array([0, -1]),
             Actions.right.value: np.array([0, 1]),
             Actions.left.value: np.array([0, -1])
@@ -67,9 +71,11 @@ class NonogramEnv(gym.Env):
 
     def _get_info(self):
         return {
-            "distance": np.linalg.norm(
-                self._agent_location - self._target_location, ord=1
-            )
+            "agent": self._agent_location,
+            "completion": np.sum(self.game_mtx) / (self.size ** 2),
+            "game_mtx": self.game_mtx
         }
+
+    
 
         
