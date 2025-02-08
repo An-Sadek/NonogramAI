@@ -55,11 +55,16 @@ class Actions(Enum):
 class NonogramEnv(gym.Env):
     metadata = {"render_mode": ["human"], "render_fps": 4}
 
-    def __init__(self, render_mode = None, size=5, seed=42):
+    def __init__(self, lives=3, render_mode = None, size=5, seed=0):
         self.size = size
         self.window_size = 512
 
-        max_clue = math.ceil(size / 2) # Trong truong hop nhieu nhat chi co n/2 goi y
+        # So lan thu
+        self.MAX_LIFE = lives
+        self.curr_lives = lives
+
+        # Truong hop nhieu gio y nhat chi co n/2
+        max_clue = math.ceil(size / 2) 
             
         self.observation_space = spaces.Dict(
             {
@@ -80,15 +85,42 @@ class NonogramEnv(gym.Env):
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
 
-        def _get_obs(self):
-            return {"agent": self._agent_location, "target": self._target_location}
+    def _get_obs(self):
+        return {
+            "game_grid": self.game_grid, 
+            "row_clues": self.row_clues, 
+            "col_clues": self.col_clues
+        }
 
-        def _get_info(self):
-            pass
+    def _get_info(self):
+        return {
+            "life_left": self.curr_lives,
+            "completion": np.sum((self.game_grid == self.result)) / (self.size*self.size),
+            "correct": self.game_grid == self.result
+        }
+
+    def reset(self, seed=None, options=None):
+        """
+        Reset lai trang thai ban dau
+        """
+        self.lives = self.MAX_LIFE
+        
+        self.game_grid = np.zeros(shape=(self.size, self.size), dtype=int) - 1
+        self.result = create_grid(self.size, seed=seed)
+        self.row_clues = extract_clues(self.result)
+        self.col_clues = extract_clues(self.result.T)  
+
+        observation = self._get_obs()
+        info = self._get_info()
+
+        if self.render_mode == "human":
+            self._render_frame()
+
+        return observation, info
 
 if __name__ == "__main__":
     print("Test ham ngoai")
-    seed = 1
+    seed = 0
     mtx = create_grid(5, seed)
     
     print(mtx)
@@ -110,3 +142,6 @@ if __name__ == "__main__":
 
     print("\nGoi y cot")
     print(env.col_clues)
+
+    print("\nTest reset")
+    print(env.reset())
