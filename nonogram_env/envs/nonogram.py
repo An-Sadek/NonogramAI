@@ -53,7 +53,7 @@ class Actions(Enum):
     place_1 = 4
 
 class NonogramEnv(gym.Env):
-    metadata = {"render_mode": ["human"], "render_fps": 4}
+    metadata = {"render_mode": ["human", "rgb_array"], "render_fps": 4}
 
     def __init__(self, lives=3, render_mode = None, size=5, seed=0):
         self.size = size
