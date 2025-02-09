@@ -67,9 +67,17 @@ class NonogramEnv(gym.Env):
         Neu con 180s, so diem se la 180/180 * n
         Neu con 45s, so diem se la 45/180 * n
     """
-    metadata = {"render_mode": ["human", "rgn_array"], "render_fps": 4}
+    metadata = {"render_mode": ["human", "rgb_array", "array"], "render_fps": 4}
 
-    def __init__(self, lives: int=3, time_limit: int=None, render_mode = None, size=5, reward_mult = 100):
+    def __init__(
+        self, 
+        lives: int=3, 
+        time_limit: int=None, 
+        render_mode = None, 
+        size=5, 
+        solved_reward = 10,
+        bonus_mult=100
+    ):
 
         self.size = size
         self.window_size=512
@@ -101,7 +109,6 @@ class NonogramEnv(gym.Env):
         assert time_limit is None or time_limit > 0, "Thoi gian gioi han la int hoac None"
         self.start_time = time.time()
         self.TIME_LIMIT = time_limit
-        self.time_left = time_limit
 
         # So luong hanh dong cua bot
         self.action_space = spaces.Discrete(4)
@@ -114,8 +121,11 @@ class NonogramEnv(gym.Env):
         self.row_clues = extract_clues(self.result)
         self.col_clues = extract_clues(self.result.T)
 
+        # So diem moi lan hoan thanh
+        self.solved_reward = solved_reward
+
         # He so nhan phan thuong
-        self.reward_mult = reward_mult
+        self.bonus_mult = bonus_mult
 
         # Render mode = human thi tao window cho nguoi ta coi
         assert render_mode is None or render_mode in self.metadata["render_modes"]
@@ -138,7 +148,7 @@ class NonogramEnv(gym.Env):
         return {
             "agent": self._agent_location,
             "lives_left": self.lives_left,
-            "time_left": self.time_left,
+            "time_left": int(time.time() - self.start_time),
             "completion": np.sum((self.game_grid == self.result)) / (self.size**2),
 
             "game_grid": self.game_grid,
@@ -170,9 +180,69 @@ class NonogramEnv(gym.Env):
 
         return observation, info
 
-    
+    def step(self, action):
+        """
+        """
+        reward = 0
         
+        # Hanh dong dau ra
+        x = self._target_location[0]
+        y = self._target_location[1]
+        
+        ## Den vi tri x
+        if action == Actions.goto_x:
+            self._target_location[0] = Actions.goto_x.value
 
+        ## Den vi tri y
+        if action == Actions.goto_y:
+            self._target_location[1] = Actions.goto_y.value
+
+        ## Dat x (0)
+        if action == Actions.place_0:
+            if self.game_grid[x, y] == self.result[x, y]:
+                reward += self.solved_reward
+            else:
+                self.lives_left -= 1
+                self.game_grid[x, y] = self.result[x, y]
+
+        ## Dat o vuong (1)
+        if action == Actions.place_1:
+            if self.game_grid[x, y] == self.result[x, y]:
+                reward += self.solved_reward
+            else:
+                self.lives_left -= 1
+                self.game_grid[x, y] = self.result[x, y]
+
+        # Dieu kien thang, thua
+        ## Dieu kien thua
+        time_left = time.time() - self.start_time
+        
+        lose_time = time_left <= self.TIME_LIMIT
+        lose_lives = self.lives_left == 0
+        lose_condition = (lose_time or lose_lives)
+        
+        ## Dieu kien thang
+        win_condition = np.array_equal(self.game_grid, self.result) and not lose_condition
+        if win_condition:
+            time_reward = (time_left / self.TIME_LIMIT) * bonus_mult
+            lives_reward = (self.lives_left / self.MAX_LIVES) * bonus_mult
+            reward += int(time_reward) + int(lives_reward)
+
+        # Ket thuc game
+        terminated = lose_condition or win_condition
+
+        observation = self._get_obs()
+        info = self._get_info()
+
+        if self.render_mode == "human":
+            self._render_frame()
+
+        return observation, reward, terminated, False, info
+
+    def render(self):
+        if self.render_mode == "array":
+            return self.game_grid
+            
 if __name__ == "__main__":
     env = NonogramEnv(time_limit=60)
 
