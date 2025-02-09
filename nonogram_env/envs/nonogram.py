@@ -1,4 +1,5 @@
 import math
+import time
 
 from enum import Enum
 import gymnasium as gym
@@ -7,7 +8,7 @@ import pygame
 import numpy as np
 
 
-def create_grid(size: int, seed) -> np.ndarray:
+def create_grid(size: int, seed=0) -> np.ndarray:
     return np.random.randint(0, 2, size=(size, size))
 
 def extract_clues(matrix: np.ndarray):
@@ -46,69 +47,189 @@ class Actions(Enum):
     Dung yen de no co the suy nghi ra hanh dong khac.
     Di chuyen den cac o khac va dat 0 tuong ung voi x, 1 tuong ung voi o vuong.
     """
-    stay = 0
-    goto_x = 1
-    goto_y = 2
-    place_0 = 3
-    place_1 = 4
+    goto_x = 0
+    goto_y = 1
+    place_0 = 2
+    place_1 = 3
+
 
 class NonogramEnv(gym.Env):
-    metadata = {"render_mode": ["human", "rgb_array"], "render_fps": 4}
+    """
+    De co the thuong cho con bot lam it sai hon, va lam nhanh hon thi can chuan hoa mang va thoi gian
+    Cach de chuan hoa la ve [0, 1] * n voi n la he_so_phan_thuong
 
-    def __init__(self, lives=3, render_mode = None, size=5, seed=0):
+    Gia su chi co 5 mang thi khi hoan thanh:
+        Neu con 5 mang, thi so diem se la 5/5 * n.
+        Neu con 4 mang, 4/5*n
+
+    Doi voi moc thoi gian cung vay
+    Gia su cho 3'
+        Neu con 180s, so diem se la 180/180 * n
+        Neu con 45s, so diem se la 45/180 * n
+    """
+    metadata = {"render_modes": ["human", "rgb_array", "array"], "render_fps": 4}
+
+    def __init__(
+        self, 
+        lives: int=3, 
+        time_limit: int=None, 
+        render_mode = None, 
+        size=5, 
+        solved_reward = 10,
+        bonus_mult=100
+    ):
+
         self.size = size
-        self.window_size = 512
+        self.window_size=512
 
-        # So lan thu
-        self.MAX_LIFE = lives
-        self.curr_lives = lives
+        # Truong hop nhieu goi y nhat la ceil(n/2)
+        # Nhung kha nang thap vi xs ham pp deu la 0.5, tru khi ma tran nho qua
+        MAX_CLUES = math.ceil(size/2)
 
-        # Truong hop nhieu gio y nhat chi co n/2
-        max_clue = math.ceil(size / 2) 
-            
         self.observation_space = spaces.Dict(
             {
+                "agent": spaces.Box(0, size - 1, shape=(2,), dtype=int),
+                "lives_left": spaces.Discrete(lives, start=1),
+                
                 "game_grid": spaces.Box(-1, 2, shape=(size, size), dtype=int),
-                "row_clues": spaces.Box(0, size + 1, shape=(size, max_clue), dtype=int),
-                "col_clues": spaces.Box(0, size + 1, shape=(size, max_clue), dtype=int)
+                "row_clues": spaces.Box(0, size + 1, shape=(size, MAX_CLUES), dtype=int),
+                "col_clues": spaces.Box(0, size + 1, shape=(size, MAX_CLUES), dtype=int)
             }
         )
 
+        # Khoi tao vi tri cua agent
+        self._agent_location = np.array([0, 0])
+
+        # So lan thu
+        assert lives > 0, "So lan thu toi thieu la 1"
+        self.MAX_LIVES = lives # Hang so khong dung den de reset
+        self.lives_left = lives 
+
+        # Gioi han thoi gian
+        assert time_limit is None or time_limit > 0, "Thoi gian gioi han la int hoac None"
+        self.start_time = time.time()
+        self.TIME_LIMIT = time_limit
+
+        # So luong hanh dong cua bot
+        self.action_space = spaces.Discrete(4)
+
+        # Tao moi truong quan sat
         self.game_grid = np.zeros(shape=(size, size), dtype=int) - 1
-        self.result = create_grid(size, seed)
+        self.result = create_grid(size)        
+        assert self.game_grid.shape == self.result.shape, "Ma tran khong deu nhau"
+        
         self.row_clues = extract_clues(self.result)
-        self.col_clues = extract_clues(self.result.T)        
+        self.col_clues = extract_clues(self.result.T)
 
-        # So luong hanh dong
-        self.action_space = spaces.Discrete(5)
+        # So diem moi lan hoan thanh
+        self.solved_reward = solved_reward
 
+        # He so nhan phan thuong
+        self.bonus_mult = bonus_mult
+
+        # Render mode = human thi tao window cho nguoi ta coi
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
 
+        self.window = None
+        self.clock = None
+
     def _get_obs(self):
         return {
-            "game_grid": self.game_grid, 
-            "row_clues": self.row_clues, 
+            "agent": self._agent_location,
+            "lives_left": self.lives_left, # Cho agent biet so mang con lai de xem goi y neu bi qua
+
+            "game_grid": self.game_grid,
+            "row_clues": self.row_clues,
             "col_clues": self.col_clues
         }
-
+    
     def _get_info(self):
         return {
-            "life_left": self.curr_lives,
-            "completion": np.sum((self.game_grid == self.result)) / (self.size*self.size),
-            "correct": self.game_grid == self.result
+            "agent": self._agent_location,
+            "lives_left": self.lives_left,
+            "time_left": int(time.time() - self.start_time),
+            "completion": np.sum((self.game_grid == self.result)) / (self.size**2),
+
+            "game_grid": self.game_grid,
+            "result": self.result
         }
 
     def reset(self, seed=None, options=None):
-        """
-        Reset lai trang thai ban dau
-        """
-        self.lives = self.MAX_LIFE
-        
+        super().reset(seed=seed)
+
+        # Reset vi tri
+        self._agent_location = np.array([0, 0], dtype=int)
+
+        # Reset lai so mang
+        self.lives_left = self.MAX_LIVES
+
+        # Reset lai thoi gian
+        self.start_time = time.time()
+        self.time_left = self.TIME_LIMIT
+
+        # Reset lai ma tran game va goi y
         self.game_grid = np.zeros(shape=(self.size, self.size), dtype=int) - 1
-        self.result = create_grid(self.size, seed=seed)
+        self.result = create_grid(self.size, seed)
         self.row_clues = extract_clues(self.result)
-        self.col_clues = extract_clues(self.result.T)  
+        self.col_clues = extract_clues(self.result.T)
+
+        # Lay obs space va info
+        observation = self._get_obs()
+        info = self._get_info()
+
+        return observation, info
+
+    def step(self, action):
+        """
+        """
+        reward = 0
+        
+        # Hanh dong dau ra
+        x = self._target_location[0]
+        y = self._target_location[1]
+        
+        ## Den vi tri x
+        if action == Actions.goto_x:
+            self._target_location[0] = Actions.goto_x.value
+
+        ## Den vi tri y
+        if action == Actions.goto_y:
+            self._target_location[1] = Actions.goto_y.value
+
+        ## Dat x (0)
+        if action == Actions.place_0:
+            if self.game_grid[x, y] == self.result[x, y]:
+                reward += self.solved_reward
+            else:
+                self.lives_left -= 1
+                self.game_grid[x, y] = self.result[x, y]
+
+        ## Dat o vuong (1)
+        if action == Actions.place_1:
+            if self.game_grid[x, y] == self.result[x, y]:
+                reward += self.solved_reward
+            else:
+                self.lives_left -= 1
+                self.game_grid[x, y] = self.result[x, y]
+
+        # Dieu kien thang, thua
+        ## Dieu kien thua
+        time_left = time.time() - self.start_time
+        
+        lose_time = time_left <= self.TIME_LIMIT
+        lose_lives = self.lives_left == 0
+        lose_condition = (lose_time or lose_lives)
+        
+        ## Dieu kien thang
+        win_condition = np.array_equal(self.game_grid, self.result) and not lose_condition
+        if win_condition:
+            time_reward = (time_left / self.TIME_LIMIT) * bonus_mult
+            lives_reward = (self.lives_left / self.MAX_LIVES) * bonus_mult
+            reward += int(time_reward) + int(lives_reward)
+
+        # Ket thuc game
+        terminated = lose_condition or win_condition
 
         observation = self._get_obs()
         info = self._get_info()
@@ -116,32 +237,29 @@ class NonogramEnv(gym.Env):
         if self.render_mode == "human":
             self._render_frame()
 
-        return observation, info
+        return observation, reward, terminated, False, info
 
+    def render(self):
+        if self.render_mode == "array":
+            return self.game_grid
+            
 if __name__ == "__main__":
-    print("Test ham ngoai")
-    seed = 0
-    mtx = create_grid(5, seed)
+    env = NonogramEnv(time_limit=60)
+
+    print("\n\ninit")
+    print("\n_get_obs")
+    print(env._get_obs())
+
+    print("\n_get_info")
+    print(env._get_info())
+
+    print("\n\nreset")
+    env.reset(1)
+    print("\n_get_obs")
+    print(env._get_obs())
+
+    print("\n_get_info")
+    print(env._get_info())
     
-    print(mtx)
-    r_clues = extract_clues(mtx)
-    c_clues = extract_clues(mtx.T)
-    print(r_clues)
-    print(c_clues)
+        
 
-    print("\n\nTest moi truong")
-    env = NonogramEnv()
-    print("\nMa tran khoi tao")
-    print(env.game_grid)
-    
-    print("\nKet qua thuc te")
-    print(env.result)
-
-    print("\nGoi y hang")
-    print(env.row_clues)
-
-    print("\nGoi y cot")
-    print(env.col_clues)
-
-    print("\nTest reset")
-    print(env.reset())
